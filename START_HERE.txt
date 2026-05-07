@@ -1,0 +1,7 @@
+Open PowerShell in this folder.
+
+Run:
+
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements_pc.txt
+.\.venv\Scripts\python.exe -m pc_gui.main
