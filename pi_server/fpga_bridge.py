@@ -24,9 +24,12 @@ class FPGABridge:
             raise FPGABridgeError(f"Unknown operation: {operation!r}")
 
         payload = json.dumps({"op": op, "a": a, "b": b}, separators=(",", ":")).encode("utf-8") + b"\n"
-        self._ser.reset_input_buffer()
-        self._ser.write(payload)
-        self._ser.flush()
+        try:
+            self._ser.reset_input_buffer()
+            self._ser.write(payload)
+            self._ser.flush()
+        except serial.SerialException as exc:
+            raise FPGABridgeError(f"UART write error: {exc}") from exc
 
         raw = self._read_response()
         if not raw:
@@ -37,13 +40,16 @@ class FPGABridge:
     def _read_response(self) -> bytes:
         deadline = time.monotonic() + _RESPONSE_TIMEOUT
         buf = bytearray()
-        while time.monotonic() < deadline:
-            waiting = self._ser.in_waiting
-            if waiting:
-                buf.extend(self._ser.read(waiting))
-                if b"\n" in buf:
-                    break
-            time.sleep(0.01)
+        try:
+            while time.monotonic() < deadline:
+                waiting = self._ser.in_waiting
+                if waiting:
+                    buf.extend(self._ser.read(waiting))
+                    if b"\n" in buf:
+                        break
+                time.sleep(0.01)
+        except serial.SerialException as exc:
+            raise FPGABridgeError(f"UART read error: {exc}") from exc
         return bytes(buf).strip()
 
     def _parse_response(self, raw: bytes) -> int:

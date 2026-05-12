@@ -40,7 +40,13 @@ def _handle_client(conn, addr, bridge):
 
             header = msg.get("header", "")
             log.info("<- %s  header=%r", peer, header)
-            response = _dispatch(header, msg, bridge)
+
+            try:
+                response = _dispatch(header, msg, bridge)
+            except Exception as exc:
+                log.error("Unhandled error dispatching %r from %s: %s", header, peer, exc, exc_info=True)
+                response = {"status": "error", "message": f"Internal server error: {exc}"}
+
             log.info("-> %s  status=%r", peer, response.get("status"))
 
             try:
@@ -59,6 +65,8 @@ def _dispatch(header, msg, bridge):
     if header == "PING":
         return {"status": "ok", "message": "pong"}
     if header == "ALSU":
+        if bridge is None:
+            return {"status": "error", "message": "FPGA ALSU bridge unavailable (UART init failed — check --uart-port)."}
         return _handle_alsu(msg, bridge)
     if header == "FILE":
         return _handle_file(msg)
@@ -96,7 +104,6 @@ def _handle_file(msg):
 
     log.info("Received %d bytes for %s", len(data), filename)
 
-    # Write to a temp file and program the FPGA
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".bit", delete=False) as tmp:
@@ -122,8 +129,14 @@ def _handle_file(msg):
 
 # ── Server entry point ─────────────────────────────────────────────────────────
 
-def run_server(host="0.0.0.0", port=5000):
-    bridge = FPGABridge()
+def run_server(host="0.0.0.0", port=5000, uart_port="/dev/ttyUSB0", baud=115200):
+    try:
+        bridge = FPGABridge(port=uart_port, baud=baud)
+        log.info("FPGA bridge opened on %s at %d baud.", uart_port, baud)
+    except Exception as exc:
+        log.warning("FPGA bridge init failed (%s) — ALSU unavailable, bitstream upload still works.", exc)
+        bridge = None
+
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_sock.bind((host, port))
@@ -138,12 +151,16 @@ def run_server(host="0.0.0.0", port=5000):
         log.info("Server shutting down.")
     finally:
         server_sock.close()
-        bridge.close()
+        if bridge is not None:
+            bridge.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="FPGA ALSU Pi server")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--uart-port", default="/dev/ttyUSB0",
+                        help="Serial device for FPGA ALSU communication (default: /dev/ttyUSB0)")
+    parser.add_argument("--baud", type=int, default=115200)
     args = parser.parse_args()
-    run_server(host=args.host, port=args.port)
+    run_server(host=args.host, port=args.port, uart_port=args.uart_port, baud=args.baud)

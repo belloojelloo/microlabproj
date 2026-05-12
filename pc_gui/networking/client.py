@@ -18,9 +18,15 @@ _UPLOAD_TIMEOUT = 60.0  # FPGA programming can take a while
 
 
 class NetworkClient:
-    def __init__(self, result_callback: Callable, log_callback: Callable) -> None:
+    def __init__(
+        self,
+        result_callback: Callable,
+        log_callback: Callable,
+        connection_lost_callback: Optional[Callable] = None,
+    ) -> None:
         self._result_cb = result_callback
         self._log_cb = log_callback
+        self._connection_lost_cb = connection_lost_callback
         self._sock: Optional[socket.socket] = None
         self._lock = threading.Lock()
 
@@ -176,3 +182,5 @@ class NetworkClient:
                 sock.close()
             except OSError:
                 pass
+            if self._connection_lost_cb:
+                self._connection_lost_cb()
