@@ -1,5 +1,13 @@
+import json
+import time
+
+import serial
+
 VALID_OPERATIONS = {"ADD", "SUB", "MUL", "SHIFT", "BYPASS", "XOR"}
 _RESULT_MASK = 0xFFFF
+_UART_PORT = "/dev/ttyAMA0"
+_BAUD_RATE = 115200
+_RESPONSE_TIMEOUT = 2.0
 
 
 class FPGABridgeError(Exception):
@@ -7,27 +15,55 @@ class FPGABridgeError(Exception):
 
 
 class FPGABridge:
-    def __init__(self):
-        pass  # Future: open UART/SPI port here
+    def __init__(self, port: str = _UART_PORT, baud: int = _BAUD_RATE):
+        self._ser = serial.Serial(port, baud, timeout=0)
 
     def compute(self, operation: str, a: int, b: int) -> int:
         op = operation.upper()
         if op not in VALID_OPERATIONS:
             raise FPGABridgeError(f"Unknown operation: {operation!r}")
-        # Software simulation — replace with real FPGA comms
-        if op == "ADD":
-            return (a + b) & _RESULT_MASK
-        if op == "SUB":
-            return (a - b) & _RESULT_MASK
-        if op == "MUL":
-            return (a * b) & _RESULT_MASK
-        if op == "SHIFT":
-            return (a << b) & _RESULT_MASK
-        if op == "BYPASS":
-            return a & _RESULT_MASK
-        if op == "XOR":
-            return (a ^ b) & _RESULT_MASK
-        raise FPGABridgeError(f"Unhandled operation: {op}")
+
+        payload = json.dumps({"op": op, "a": a, "b": b}, separators=(",", ":")).encode("utf-8") + b"\n"
+        self._ser.reset_input_buffer()
+        self._ser.write(payload)
+        self._ser.flush()
+
+        raw = self._read_response()
+        if not raw:
+            raise FPGABridgeError("Timed out waiting for FPGA ALSU response.")
+
+        return self._parse_response(raw)
+
+    def _read_response(self) -> bytes:
+        deadline = time.monotonic() + _RESPONSE_TIMEOUT
+        buf = bytearray()
+        while time.monotonic() < deadline:
+            waiting = self._ser.in_waiting
+            if waiting:
+                buf.extend(self._ser.read(waiting))
+                if b"\n" in buf:
+                    break
+            time.sleep(0.01)
+        return bytes(buf).strip()
+
+    def _parse_response(self, raw: bytes) -> int:
+        text = raw.decode("utf-8", errors="replace").strip()
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            try:
+                return int(text, 0) & _RESULT_MASK
+            except ValueError:
+                raise FPGABridgeError(f"FPGA returned invalid ALSU result: {text!r}")
+
+        if isinstance(data, int):
+            return data & _RESULT_MASK
+        if isinstance(data, dict):
+            if data.get("status") == "error":
+                raise FPGABridgeError(str(data.get("message", "FPGA reported an error.")))
+            if "result" in data:
+                return int(data["result"]) & _RESULT_MASK
+        raise FPGABridgeError(f"Unexpected FPGA response: {text!r}")
 
     def close(self):
-        pass  # Future: close serial port here
+        self._ser.close()

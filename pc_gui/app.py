@@ -1,4 +1,3 @@
-import time
 import threading
 
 import customtkinter as ctk
@@ -15,7 +14,6 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.connected = False
-        self._real_connection = False
         self._client = None
 
         self.title("FPGA ALSU Controller")
@@ -55,24 +53,20 @@ class App(ctk.CTk):
             return
 
         self.result_panel.add_log(f"Connecting to {ip.strip()}:{port.strip()} ...")
-        real_ok = self._client.connect(ip.strip(), int(port.strip()))
+        ok = self._client.connect(ip.strip(), int(port.strip()))
 
-        self.connected = True
-        self._real_connection = real_ok
-
-        if real_ok:
-            self.connection_panel.set_connected(True, "Connected (live)")
+        if ok:
+            self.connected = True
+            self.connection_panel.set_connected(True, "Connected")
         else:
-            self.connection_panel.set_connected(True, "Connected (simulation)")
-            self.result_panel.add_log("No server reachable — running in local simulation mode.")
+            self.connection_panel.set_connected(False, "Connection failed", is_error=True)
 
         self._sync_controls()
 
     def handle_disconnect(self):
-        if self._real_connection and self._client is not None:
+        if self._client is not None:
             self._client.disconnect()
         self.connected = False
-        self._real_connection = False
         self.connection_panel.set_connected(False, "Disconnected")
         self.bitstream_panel.cancel_animation()
         self.bitstream_panel.reset_progress()
@@ -94,22 +88,10 @@ class App(ctk.CTk):
         self.alsu_panel.clear_error()
         a_value = int(a_str.strip())
         b_value = 0 if operation == "BYPASS" else int(b_str.strip())
-        result = None
 
-        if self._real_connection:
-            # Primary path: ask the Pi/FPGA via TCP
-            result = self._client.send_alsu_request(operation, a_value, b_value)
-            if result is None:
-                # Server failed mid-session — downgrade to simulation
-                self._real_connection = False
-                self.connection_panel.set_connected(True, "Connected (simulation)")
-                self.result_panel.add_log(
-                    "Server request failed — falling back to local simulation."
-                )
-
+        result = self._client.send_alsu_request(operation, a_value, b_value)
         if result is None:
-            # Simulation path (either no live connection, or after fallback)
-            result = self._simulate_alsu(operation, a_value, b_value)
+            return
 
         self.result_panel.update_result(result)
         self.result_panel.add_log(f"{operation} A={a_value} B={b_value} -> {result}")
@@ -124,21 +106,10 @@ class App(ctk.CTk):
         if not self.connected or not selected_file:
             return
 
-        if self._real_connection:
-            # Primary path: send the real file bytes to the Pi over TCP
-            def upload_fn(progress_cb):
-                return self._client.send_bitstream(selected_file, progress_cb)
-            mode = "live"
-        else:
-            # Simulation: step through a fake progress bar
-            def upload_fn(progress_cb):
-                for pct in range(0, 101, 5):
-                    time.sleep(0.08)
-                    progress_cb(pct)
-                return True
-            mode = "simulated"
+        def upload_fn(progress_cb):
+            return self._client.send_bitstream(selected_file, progress_cb)
 
-        self.result_panel.add_log(f"Started {mode} upload: {selected_file}")
+        self.result_panel.add_log(f"Uploading: {selected_file}")
         self.bitstream_panel.start_upload(upload_fn, self._finish_upload_result)
 
     def _finish_upload_result(self, success: bool):
@@ -158,23 +129,8 @@ class App(ctk.CTk):
             self.connected and self.bitstream_panel.has_selected_file()
         )
 
-    def _simulate_alsu(self, operation, a_value, b_value) -> int:
-        if operation == "ADD":
-            return (a_value + b_value) & 0xFFFF
-        if operation == "SUB":
-            return (a_value - b_value) & 0xFFFF
-        if operation == "MUL":
-            return (a_value * b_value) & 0xFFFF
-        if operation == "SHIFT":
-            return (a_value << b_value) & 0xFFFF
-        if operation == "BYPASS":
-            return a_value
-        if operation == "XOR":
-            return a_value ^ b_value
-        raise ValueError(f"Unsupported operation: {operation}")
-
     def on_close(self):
         self.bitstream_panel.cancel_animation()
-        if self._real_connection and self._client is not None:
+        if self._client is not None:
             self._client.disconnect()
         self.destroy()
