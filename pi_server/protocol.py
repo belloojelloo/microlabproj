@@ -3,7 +3,7 @@ import struct
 
 _HEADER_FMT = ">I"
 _HEADER_SIZE = struct.calcsize(_HEADER_FMT)
-_MAX_PAYLOAD = 4 * 1024 * 1024
+_MAX_PAYLOAD = 16 * 1024 * 1024  # match pc_gui limit; bitstreams up to ~12 MB raw
 
 
 class ProtocolError(Exception):
