@@ -27,7 +27,14 @@ def _handle_client(conn, addr, bridge):
         while True:
             try:
                 msg = recv_message(conn)
-            except (ProtocolError, Exception) as exc:
+            except ProtocolError as exc:
+                log.warning("Protocol error from %s: %s", peer, exc)
+                try:
+                    conn.sendall(encode_message({"status": "error", "message": f"Protocol error: {exc}"}))
+                except OSError:
+                    pass
+                break
+            except Exception as exc:
                 log.debug("recv ended for %s: %s", peer, exc)
                 break
 
