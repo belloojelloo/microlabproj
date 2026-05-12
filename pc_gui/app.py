@@ -36,6 +36,7 @@ class App(ctk.CTk):
         self._client = NetworkClient(
             result_callback=lambda result: None,
             log_callback=self.result_panel.add_log,
+            connection_lost_callback=lambda: self.after(0, self._on_connection_lost),
         )
         self._sync_controls()
 
@@ -120,6 +121,15 @@ class App(ctk.CTk):
             self.bitstream_panel.set_status("Upload failed", "red")
             self.result_panel.add_log("Upload failed — check connection and server log")
         self._sync_controls()
+
+    def _on_connection_lost(self):
+        if not self.connected:
+            return
+        self.connected = False
+        self.connection_panel.set_connected(False, "Connection lost — reconnect to continue")
+        self.bitstream_panel.set_status("", None)
+        self._sync_controls()
+        self.result_panel.add_log("Connection to Pi server lost.")
 
     # ── Internal helpers ────────────────────────────────────────────────────────
 

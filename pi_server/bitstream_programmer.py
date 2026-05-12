@@ -9,7 +9,7 @@ class BitstreamError(Exception):
 
 class BitstreamProgrammer:
     _MIN_VALID_SIZE = 4
-    _BOARD = "bpi_f5"
+    _BOARD = "basys3"
 
     def program(self, filepath: str, progress_callback: Optional[Callable[[int], None]] = None) -> None:
         if not os.path.isfile(filepath):
